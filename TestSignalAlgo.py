@@ -10,22 +10,21 @@ from Cryptodome.Cipher import AES
 
 
 def b64(msg):
-    # base64 encoding helper function
+    # base64 допоміжна функція кодування
     return base64.encodebytes(msg).decode('utf-8').strip()
 
 def hkdf(inp, length):
-    # use HKDF on an input to derive a key
+    # використовуєм HKDF на вході, щоб отримати ключ
     hkdf = HKDF(algorithm=hashes.SHA256(), length=length, salt=b'',
                 info=b'', backend=default_backend())
     return hkdf.derive(inp)
 
 def pad(msg):
-    # pkcs7 padding
     num = 16 - (len(msg) % 16)
     return msg + bytes([num] * num)
 
 def unpad(msg):
-    # remove pkcs7 padding
+    # видалити заповнення pkcs7
     return msg[:-msg[-1]]
 
 # Realize Symmetric Ratchet
@@ -88,52 +87,49 @@ class Bob(object):
         alice.recv(cipher, state.DHratchet.public_key())
 
     def recv(state, cipher, alice_public_key):
-        # receive Alice's new public key and use it to perform a DH
+        # отримати новий відкритий ключ Аліси і використовувати його для виконання DH
         state.dh_ratchet(alice_public_key)
         key, iv = state.recv_ratchet.next()
-        # decrypt the message using the new recv ratchet
+        # розшифрує повідомлення за допомогою нової трещотки recv
         msg = unpad(AES.new(key, AES.MODE_CBC, iv).decrypt(cipher))
         print('[Bob]\tDecrypted message:', msg)
 
-    def dh_ratchet_rotation_send(state, public_key: bytes) -> None:
-        state.DHratchet = X25519PrivateKey.generate()
-
-        dh_send = state.DHratchet.exchange(public_key)
-        shared_send = state.root_ratchet.next(dh_send)[0]
-
-        state.send_ratchet = SymmetricRatchet(shared_send)
-
+    # def dh_ratchet_rotation_send(state, public_key: bytes) -> None:
+    #     state.DHratchet = X25519PrivateKey.generate()
+    #     dh_send = state.DHratchet.exchange(public_key)
+    #     shared_send = state.root_ratchet.next(dh_send)[0]
+    #     state.send_ratchet = SymmetricRatchet(shared_send)
+    #
 
 class Alice(object):
     def __init__(state):
-        # generate Alice's keys
+        #згенерувати ключі Аліси
         state.IKa = X25519PrivateKey.generate()
         state.EKa = X25519PrivateKey.generate()
         state.DHratchet = None
 
     def x3dh(state, bob):
-        # perform the 4 Diffie Hellman exchanges (X3DH)
+        # виконати 4 обміни Діффі Хеллмана (X3DH)
         dh1 = state.IKa.exchange(bob.SPKb.public_key())
         dh2 = state.EKa.exchange(bob.IKb.public_key())
         dh3 = state.EKa.exchange(bob.SPKb.public_key())
         dh4 = state.EKa.exchange(bob.OPKb.public_key())
-        # the shared key is KDF(DH1||DH2||DH3||DH4)
+        # спільний ключ KDF(DH1||DH2||DH3||DH4)
         state.sk = hkdf(dh1 + dh2 + dh3 + dh4, 32)
         print('[Alice]\tShared key:', b64(state.sk))
 
     def RatchetInitAlice(state):
-        # initialise the root chain with the shared key
+        # ініціалізуйте кореневий ланцюжок за допомогою спільного ключа
         state.root_ratchet = SymmetricRatchet(state.sk)
-        # initialise the sending and recving chains
+
         state.send_ratchet = SymmetricRatchet(state.root_ratchet.next()[0])
         state.recv_ratchet = SymmetricRatchet(state.root_ratchet.next()[0])
 
     def dh_ratchet(state, bob_public):
         if state.DHratchet is not None:
-
+            #для першого разу
             dh_recv = state.DHratchet.exchange(bob_public)
             shared_recv = state.root_ratchet.next(dh_recv)[0]
-
             state.recv_ratchet = SymmetricRatchet(shared_recv)
             print('[Alice]\tRecv ratchet seed:', b64(shared_recv))
 
@@ -147,26 +143,26 @@ class Alice(object):
         key, iv = state.send_ratchet.next()
         cipher = AES.new(key, AES.MODE_CBC, iv).encrypt(pad(msg))
         print('[Alice]\tSending ciphertext to Bob:', b64(cipher))
-        # send ciphertext and current DH public key
+        # надіслати зашифрований текст і поточний відкритий ключ DH
         bob.recv(cipher, state.DHratchet.public_key())
 
     def recv(state, cipher, bob_public_key):
-        # receive Bob's new public key and use it to perform a DH
+        # отримати новий відкритий ключ Боба і використовувати його для виконання DH
         state.dh_ratchet(bob_public_key)
         key, iv = state.recv_ratchet.next()
-        # decrypt the message using the new recv ratchet
+        # розшифрує повідомлення за допомогою нової ratchet recv
         msg = unpad(AES.new(key, AES.MODE_CBC, iv).decrypt(cipher))
         print('[Alice]\tDecrypted message:', msg)
 
-    def dh_ratchet_rotation_send(state, public_key: bytes):
-        state.DHratchet = X25519PrivateKey.generate()
-    
-        dh_send = state.DHratchet.exchange(public_key)
-        shared_send = state.root_ratchet.next(dh_send)[0]
-    
-        state.send_ratchet = SymmetricRatchet(shared_send)
-
-        print('[Alice]\tSend ratchet seed:', b64(shared_send))
+    # def dh_ratchet_rotation_send(state, public_key: bytes):
+    #     state.DHratchet = X25519PrivateKey.generate()
+    #
+    #     dh_send = state.DHratchet.exchange(public_key)
+    #     shared_send = state.root_ratchet.next(dh_send)[0]
+    #
+    #     state.send_ratchet = SymmetricRatchet(shared_send)
+    #
+    #     print('[Alice]\tSend ratchet seed:', b64(shared_send))
 
 
 
@@ -183,7 +179,7 @@ bob.RatchetInitBob()
 
 alice.dh_ratchet(bob.DHratchet.public_key())
 
-alice.send(bob, b'Statrt!')
+alice.send(bob, b'Start dialogue !')
 
 bob.send(alice, b'sdsdsd')
 alice.send(bob, b'Hello !')
